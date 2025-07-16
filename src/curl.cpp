@@ -30,6 +30,7 @@
 #include <string>
 #include <unistd.h>
 #include <utility>
+#include <sys/mman.h>
 
 #include "common.h"
 #include "s3fs.h"
@@ -44,6 +45,7 @@
 #include "addhead.h"
 #include "s3fs_threadreqs.h"
 #include "s3fs_xml.h"
+#include "cse_util.h"
 
 //-------------------------------------------------------------------
 // Symbols
@@ -1212,6 +1214,12 @@ bool S3fsCurl::PreGetObjectRequestSetCurlOpts(S3fsCurl* s3fscurl)
         return false;
     }
     if(CURLE_OK != curl_easy_setopt(s3fscurl->hCurl, CURLOPT_WRITEDATA, reinterpret_cast<void*>(s3fscurl))){
+        return false;
+    }
+    if(CURLE_OK != curl_easy_setopt(s3fscurl->hCurl, CURLOPT_HEADERDATA, reinterpret_cast<void*>(&s3fscurl->responseHeaders))){
+        return false;
+    }
+    if(CURLE_OK != curl_easy_setopt(s3fscurl->hCurl, CURLOPT_HEADERFUNCTION, HeaderCallback)){
         return false;
     }
     if(!S3fsCurl::AddUserAgent(s3fscurl->hCurl)){                            // put User-Agent
@@ -3112,16 +3120,51 @@ int S3fsCurl::GetObjectRequest(const char* tpath, int fd, off_t start, off_t siz
 {
     int result;
 
+    bool cse_decrypt = false;
+    int plaintext_fd = -1;
+    off_t read_start = start;
+    off_t read_size = size;
+
+    std::array<unsigned char, AES_GCM_IV_LENGTH> iv;
+
+    std::vector<unsigned char> cse_kek = {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
+    };
+
     S3FS_PRN_INFO3("[tpath=%s][start=%lld][size=%lld][ssetype=%u][ssevalue=%s]", SAFESTRPTR(tpath), static_cast<long long>(start), static_cast<long long>(size), static_cast<uint8_t>(ssetype), ssevalue.c_str());
 
     if(!tpath){
         return -EINVAL;
     }
 
-    if(0 != (result = PreGetObjectRequest(tpath, fd, start, size, ssetype, ssevalue))){
-        return result;
+    if(!cse_kek.empty()) {
+        headers_t meta;
+        HeadRequest(SAFESTRPTR(tpath), meta);
+
+        // todo: probably find a better way to tell if CSE is in use.
+        auto it = meta.find("x-amz-meta-X-Amz-Wrap-Alg");
+        if(it != meta.end()) {
+            // when CSE is in use, get the real size from Content-Length and make sure we request all of it
+            start = 0;
+            size = get_content_length(meta);
+            S3FS_PRN_INFO3("CSE in use, real size: %lld", static_cast<long long>(size));
+
+            plaintext_fd = fd;
+            fd = memfd_create("", MFD_CLOEXEC); // todo: look into MFD_HUGE_1GB here?
+            if(fd < 0) {
+                S3FS_PRN_ERR("Failed to create memfd for CSE, errno=%d", errno);
+                return -errno;
+            }
+            cse_decrypt = true;
+        }
     }
+    result = PreGetObjectRequest(tpath, fd, start, size, ssetype, ssevalue);
+
     if(!fpLazySetup || !fpLazySetup(this)){
+        if(plaintext_fd >= 0) {
+            close(fd);
+        }
         S3FS_PRN_ERR("Failed to lazy setup in single get object request.");
         return -EIO;
     }
@@ -3130,6 +3173,65 @@ int S3fsCurl::GetObjectRequest(const char* tpath, int fd, off_t start, off_t siz
 
     result = RequestPerform();
     partdata.clear();
+
+    if(cse_decrypt) {
+        auto it = responseHeaders.find("x-amz-meta-X-Amz-Key-v2");
+        // todo: validate the x-amz-meta-X-Amz-Cek-Alg header is AES/GCM/NoPadding
+        if(it == responseHeaders.end()) {
+            S3FS_PRN_INFO3("CSE CEK not found in response headers.");
+            close(fd);
+            return -EIO;
+        }
+        std::string encrypted_cse_cek_b64 = it->second;
+        std::vector<unsigned char>* cse_cek = CseUtil::decrypt_cek(encrypted_cse_cek_b64, cse_kek);
+        if(!cse_cek) {
+            S3FS_PRN_ERR("Failed to decrypt CSE CEK.");
+            close(fd);
+            return -EIO;
+        }
+        S3FS_PRN_INFO3("Successfully decrypted CSE CEK.");
+
+        it = responseHeaders.find("x-amz-meta-X-Amz-IV");
+        if(it == responseHeaders.end()) {
+            S3FS_PRN_ERR("CSE IV not found in response headers.");
+            delete cse_cek;
+            close(fd);
+            return -EIO;
+        }
+
+        std::vector<unsigned char>* decoded = CseUtil::base64_decode(it->second);
+        if(!decoded || decoded->size() != AES_GCM_IV_LENGTH) {
+            S3FS_PRN_ERR("Failed to decode CSE IV.");
+            delete cse_cek;
+            close(fd);
+            return -EIO;
+        }
+        std::copy(decoded->begin(), decoded->end(), iv.data());
+        delete decoded;
+        S3FS_PRN_INFO3("Successfully decoded the CSE IV.");
+
+        std::array<unsigned char, AES_GCM_TAG_LENGTH> tag;
+
+        std::vector<unsigned char> buffer(size);
+        ssize_t bytes_read = read(fd, buffer.data(), buffer.size());
+        if(bytes_read < AES_GCM_TAG_LENGTH) {
+            S3FS_PRN_ERR("Failed to read the CSE AES-GCM tag");
+            delete cse_cek;
+            close(fd);
+            return -EIO;
+        }
+        std::copy(buffer.end() - AES_GCM_TAG_LENGTH, buffer.end(), tag.data());
+        buffer.resize(bytes_read - AES_GCM_TAG_LENGTH);
+
+        std::vector<unsigned char>* plaintext = CseUtil::decrypt_aes_gcm(*cse_cek, iv, tag, buffer, nullptr, true);
+        if(plaintext) {
+            write(plaintext_fd, plaintext->data() + read_start, std::min((plaintext->size() - read_start), (size_t)read_size));
+            delete plaintext;
+        }
+
+        delete cse_cek;
+        close(fd);
+    }
 
     return result;
 }
