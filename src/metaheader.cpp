@@ -107,18 +107,46 @@ struct timespec get_atime(const headers_t& meta, bool overcheck)
     return DEFAULT_TIMESPEC;
 }
 
-off_t get_size(const char *s)
+// returns the tag length in bytes
+off_t get_cse_tag_length(const headers_t& meta)
 {
-    return cvt_strtoofft(s, /*base=*/ 10);
+    off_t length = 0;
+
+	auto iter = meta.find("x-amz-meta-x-amz-cek-alg");
+	if (iter != meta.cend()) {
+		if (iter->second.compare("AES/GCM/NoPadding") == 0) {
+			auto iter = meta.find("x-amz-meta-x-amz-tag-len");
+			if (iter != meta.cend()) {
+				if (iter->second.compare("128") == 0) {
+					length = 16;
+				}
+			}
+		}
+	}
+
+    return length;
 }
 
-off_t get_size(const headers_t& meta)
+off_t get_content_length(const headers_t& meta)
 {
     auto iter = meta.find("Content-Length");
     if(meta.cend() == iter){
         return 0;
     }
-    return get_size((*iter).second.c_str());
+    off_t content_length = cvt_strtoofft((*iter).second.c_str(), /*base=*/ 10);
+    return content_length;
+}
+
+off_t get_size(const headers_t& meta)
+{
+    off_t size = get_content_length(meta);
+    off_t modifier = get_cse_tag_length(meta) * -1;
+
+    size += modifier;
+    if (size < 0) {
+        return 0;
+    }
+    return size;
 }
 
 mode_t get_mode(const char *s, int base)

@@ -46,6 +46,7 @@ struct timespec get_ctime(const headers_t& meta, bool overcheck = true);
 struct timespec get_atime(const headers_t& meta, bool overcheck = true);
 off_t get_size(const char *s);
 off_t get_size(const headers_t& meta);
+off_t get_content_length(const headers_t& meta);
 mode_t get_mode(const char *s, int base = 0);
 mode_t get_mode(const headers_t& meta, const std::string& strpath, bool checkdir = false, bool forcedir = false);
 uid_t get_uid(const char *s);
@@ -59,6 +60,7 @@ time_t get_lastmodified(const headers_t& meta);
 bool is_need_check_obj_detail(const headers_t& meta);
 bool merge_headers(headers_t& base, const headers_t& additional, bool add_noexist);
 bool convert_header_to_stat(const char* path, const headers_t& meta, struct stat* pst, bool forcedir = false);
+off_t get_cse_tag_length(const headers_t& meta);
 
 #endif // S3FS_METAHEADER_H_
 
