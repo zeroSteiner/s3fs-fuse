@@ -24,6 +24,7 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <vector>
 #include <strings.h>
 
 //
@@ -114,6 +115,7 @@ bool get_keyword_value(const std::string& target, const char* keyword, std::stri
 //
 // For binary string
 //
+std::vector<unsigned char>* s3fs_hex_to_bin(const char* hex);
 std::string s3fs_hex_lower(const unsigned char* input, size_t length);
 std::string s3fs_hex_upper(const unsigned char* input, size_t length);
 std::string s3fs_base64(const unsigned char* input, size_t length);

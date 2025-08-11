@@ -3127,18 +3127,14 @@ int S3fsCurl::GetObjectRequest(const char* tpath, int fd, off_t start, off_t siz
 
     std::array<unsigned char, AES_GCM_IV_LENGTH> iv;
 
-    std::vector<unsigned char> cse_kek = {
-        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-        0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
-    };
-
     S3FS_PRN_INFO3("[tpath=%s][start=%lld][size=%lld][ssetype=%u][ssevalue=%s]", SAFESTRPTR(tpath), static_cast<long long>(start), static_cast<long long>(size), static_cast<uint8_t>(ssetype), ssevalue.c_str());
 
     if(!tpath){
         return -EINVAL;
     }
 
-    if(!cse_kek.empty()) {
+    std::vector<unsigned char> cse_aes_kek = S3fsCred::GetCSEAESKEK();
+    if(!cse_aes_kek.empty()) {
         headers_t meta;
         HeadRequest(SAFESTRPTR(tpath), meta);
 
@@ -3183,7 +3179,7 @@ int S3fsCurl::GetObjectRequest(const char* tpath, int fd, off_t start, off_t siz
             return -EIO;
         }
         std::string encrypted_cse_cek_b64 = it->second;
-        std::vector<unsigned char>* cse_cek = CseUtil::decrypt_cek(encrypted_cse_cek_b64, cse_kek);
+        std::vector<unsigned char>* cse_cek = CseUtil::decrypt_cek(encrypted_cse_cek_b64, cse_aes_kek);
         if(!cse_cek) {
             S3FS_PRN_ERR("Failed to decrypt CSE CEK.");
             close(fd);

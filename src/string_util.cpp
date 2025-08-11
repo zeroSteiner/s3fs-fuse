@@ -360,6 +360,43 @@ bool convert_unixtime_from_option_arg(const char* argv, time_t& unixtime)
     return true;
 }
 
+std::vector<unsigned char>* s3fs_hex_to_bin(const char *hex)
+{
+    size_t hex_length = strlen(hex);
+    if (hex_length % 2 != 0){
+        return nullptr; // Invalid hex string length
+    }
+    std::vector<unsigned char>* result = new std::vector<unsigned char>();
+    result->reserve(hex_length / 2);
+    for(size_t pos = 0; pos < hex_length; pos += 2) {
+        unsigned char byte = 0;
+        if(pos + 1 < hex_length){
+            if('0' <= hex[pos] && hex[pos] <= '9') {
+                byte += (hex[pos] - '0') << 4;
+            } else if('a' <= hex[pos] && hex[pos] <= 'f') {
+                byte += (hex[pos] - 'a' + 10) << 4;
+            } else if('A' <= hex[pos] && hex[pos] <= 'F') {
+                byte += (hex[pos] - 'A' + 10) << 4;
+            } else {
+                delete result; // Invalid hex character
+                return nullptr;
+            }
+            if('0' <= hex[pos + 1] && hex[pos + 1] <= '9') {
+                byte += (hex[pos + 1] - '0');
+            } else if('a' <= hex[pos + 1] && hex[pos + 1] <= 'f') {
+                byte += (hex[pos + 1] - 'a' + 10);
+            } else if('A' <= hex[pos + 1] && hex[pos + 1] <= 'F') {
+                byte += (hex[pos + 1] - 'A' + 10);
+            } else {
+                delete result; // Invalid hex character
+                return nullptr;
+            }
+        }
+        result->push_back(byte);
+    }
+    return result;
+}
+
 static std::string s3fs_hex(const unsigned char* input, size_t length, const char *hexAlphabet)
 {
     std::string hex;

@@ -5404,6 +5404,20 @@ static int my_fuse_opt_proc(void* data, const char* arg, int key, struct fuse_ar
         {
             return 0;
         }
+		else if(is_prefix(arg, "cse_aes_key=")){
+            std::vector<unsigned char>* cse_aes_kek = s3fs_hex_to_bin(strchr(arg, '=') + sizeof(char));
+            if(!cse_aes_kek){
+                S3FS_PRN_EXIT("failed to convert cse_aes_key option value to binary.");
+                return -1;
+            }
+            if((cse_aes_kek->size() != 16) && (cse_aes_kek->size() != 24) && (cse_aes_kek->size() != 32)) {
+                S3FS_PRN_EXIT("cse_aes_key option value must be 16, 24 or 32 bytes, but was %zu bytes.", cse_aes_kek->size());
+                delete cse_aes_kek;
+                return -1;
+            }
+            S3fsCred::SetCSEAESKEK(*cse_aes_kek);
+            return 0;
+		}
     }
     return 1;
 }

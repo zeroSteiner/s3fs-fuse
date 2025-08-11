@@ -134,6 +134,8 @@ constexpr char S3fsCred::IAMv2_token_hdr[];
 
 std::string S3fsCred::bucket_name;
 
+std::vector<unsigned char> S3fsCred::CSE_AES_KEK;
+
 //-------------------------------------------------------------------
 // Class Methods 
 //-------------------------------------------------------------------
@@ -149,6 +151,20 @@ bool S3fsCred::SetBucket(const std::string& bucket)
 const std::string& S3fsCred::GetBucket()
 {
     return S3fsCred::bucket_name;
+}
+
+bool S3fsCred::SetCSEAESKEK(const std::vector<unsigned char>& key)
+{
+    if((key.size() != 16) && (key.size() != 24) && (key.size() != 32)){
+        return false;
+    }
+    S3fsCred::CSE_AES_KEK = key;
+    return true;
+}
+
+const std::vector<unsigned char>& S3fsCred::GetCSEAESKEK()
+{
+    return S3fsCred::CSE_AES_KEK;
 }
 
 bool S3fsCred::ParseIAMRoleFromMetaDataResponse(const char* response, std::string& rolename)

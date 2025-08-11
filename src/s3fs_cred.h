@@ -92,6 +92,8 @@ class S3fsCred
         fp_FreeS3fsCredential    pFuncCredFree;
         fp_UpdateS3fsCredential  pFuncCredUpdate;
 
+        static std::vector<unsigned char> CSE_AES_KEK;
+
     public:
         static constexpr char IAMv2_token_url[] = "http://169.254.169.254/latest/api/token";
         static constexpr int IAMv2_token_ttl = 21600;
@@ -170,6 +172,9 @@ class S3fsCred
     public:
         static bool SetBucket(const std::string& bucket);
         static const std::string& GetBucket();
+
+        static bool SetCSEAESKEK(const std::vector<unsigned char>& key);
+        static const std::vector<unsigned char>& GetCSEAESKEK();
 
         S3fsCred();
         ~S3fsCred();
