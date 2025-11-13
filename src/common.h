@@ -39,6 +39,7 @@ extern bool           nomultipart;
 extern bool           pathrequeststyle;
 extern bool           complement_stat;
 extern bool           noxmlns;
+
 extern std::string    program_name;
 extern std::string    service_path;
 extern std::string    s3host;
@@ -57,6 +58,7 @@ extern std::atomic<long long unsigned> num_requests_mpu_complete;
 extern std::atomic<long long unsigned> num_requests_mpu_abort;
 extern std::atomic<long long unsigned> num_requests_mpu_upload_part;
 extern std::atomic<long long unsigned> num_requests_mpu_copy_part;
+extern std::atomic<int unsigned> stat_version;
 
 //-------------------------------------------------------------------
 // For weak attribute

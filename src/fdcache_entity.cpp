@@ -886,7 +886,7 @@ bool FdEntity::SetXattr(const std::string& xattr)
 
 bool FdEntity::SetModeHasLock(mode_t mode)
 {
-    orgmeta["x-amz-meta-mode"] = std::to_string(mode);
+    orgmeta["x-amz-meta-mode"] = mode_to_str(mode);
     return true;
 }
 

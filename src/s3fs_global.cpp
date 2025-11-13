@@ -30,6 +30,7 @@ bool nomultipart                  = false;
 bool pathrequeststyle             = false;
 bool complement_stat              = false;
 bool noxmlns                      = false;
+
 std::string program_name;
 std::string service_path          = "/";
 std::string s3host                = "https://s3.amazonaws.com";
@@ -47,6 +48,7 @@ std::atomic<long long unsigned> num_requests_mpu_complete;
 std::atomic<long long unsigned> num_requests_mpu_abort;
 std::atomic<long long unsigned> num_requests_mpu_upload_part;
 std::atomic<long long unsigned> num_requests_mpu_copy_part;
+std::atomic<int unsigned> stat_version{1};
 
 /*
 * Local variables:

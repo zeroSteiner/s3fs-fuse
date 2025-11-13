@@ -59,6 +59,82 @@ static struct timespec cvt_string_to_time(const char *str)
 
 static struct timespec get_time(const headers_t& meta, const char *header)
 {
+
+    headers_t::const_iterator iter;
+    if(meta.cend() == (iter = meta.find(header))){
+        return ERROR_TIMESPEC;
+    }
+    const char *str = (*iter).second.c_str();
+
+    if(!str || '\0' == *str){
+        return ERROR_TIMESPEC;
+    }
+
+    if(stat_version == 1){
+        // Version 1 format: "1657504903.019784214" (seconds.nanoseconds)
+        return cvt_string_to_time(str);
+    }
+    else if(stat_version == 2){
+        // Version 2 format: "2025-11-12T19:01:17.012625671-05:00" (ISO 8601)
+        struct tm tm_time = {};
+        long nsec = 0;
+
+        // Parse the ISO 8601 format
+        const char* result = strptime(str, "%Y-%m-%dT%H:%M:%S", &tm_time);
+        if(!result){
+            return ERROR_TIMESPEC;
+        }
+
+        // Extract nanoseconds if present
+        if(*result == '.'){
+            result++; // skip the '.'
+            std::string nsec_str;
+            while(*result >= '0' && *result <= '9'){
+                nsec_str += *result;
+                result++;
+            }
+            // Pad or truncate to 9 digits for nanoseconds
+            if(nsec_str.length() > 9){
+                nsec_str = nsec_str.substr(0, 9);
+            }else{
+                nsec_str.append(9 - nsec_str.length(), '0');
+            }
+            nsec = cvt_strtoofft(nsec_str.c_str(), /*base=*/ 10);
+        }
+
+        // Convert to time_t (mktime assumes local time, but the ISO string might have timezone)
+        // We need to handle the timezone offset
+        time_t seconds = timegm(&tm_time);
+        if(seconds == -1){
+            return ERROR_TIMESPEC;
+        }
+
+        // Handle timezone offset if present (e.g., "-05:00" or "+00:00")
+        if(*result == '+' || *result == '-'){
+            char sign = *result;
+            result++;
+            int tz_hours = 0;
+            int tz_mins = 0;
+            if(sscanf(result, "%d:%d", &tz_hours, &tz_mins) == 2){
+                int tz_offset = tz_hours * 3600 + tz_mins * 60;
+                if(sign == '-'){
+                    seconds += tz_offset;
+                }else{
+                    seconds -= tz_offset;
+                }
+            }
+        }
+
+        struct timespec ts = {seconds, nsec};
+        return ts;
+    }
+
+    // Unknown version
+    return ERROR_TIMESPEC;
+}
+
+static struct timespec get_time_v1(const headers_t& meta, const char *header)
+{
     headers_t::const_iterator iter;
     if(meta.cend() == (iter = meta.find(header))){
         return ERROR_TIMESPEC;
@@ -73,7 +149,7 @@ struct timespec get_mtime(const headers_t& meta, bool overcheck)
         return mtime;
     }
 
-    mtime = get_time(meta, "x-amz-meta-goog-reserved-file-mtime");
+    mtime = get_time_v1(meta, "x-amz-meta-goog-reserved-file-mtime");
     if(0 <= mtime.tv_sec && UTIME_OMIT != mtime.tv_nsec){
         return mtime;
     }
@@ -86,7 +162,15 @@ struct timespec get_mtime(const headers_t& meta, bool overcheck)
 
 struct timespec get_ctime(const headers_t& meta, bool overcheck)
 {
-    struct timespec ctime = get_time(meta, "x-amz-meta-ctime");
+    struct timespec ctime;
+    if (stat_version == 1) {
+        ctime = get_time_v1(meta, "x-amz-meta-ctime");
+    } else if (stat_version == 2) {
+        ctime = get_time(meta, "x-amz-meta-btime");
+    } else {
+        return OMIT_TIMESPEC;
+    }
+
     if(0 <= ctime.tv_sec && UTIME_OMIT != ctime.tv_nsec){
         return ctime;
     }
@@ -129,6 +213,19 @@ mode_t get_mode(const char *s, int base)
     return static_cast<mode_t>(cvt_strtoofft(s, base));
 }
 
+std::string mode_to_str(mode_t mode)
+{
+    if(stat_version == 1){
+        // Version 1: decimal format
+        return std::to_string(mode);
+    }else{
+        // Version 2: octal format
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%o", mode);
+        return std::string(buf);
+    }
+}
+
 mode_t get_mode(const headers_t& meta, const std::string& strpath, bool checkdir, bool forcedir)
 {
     mode_t mode     = 0;
@@ -136,7 +233,11 @@ mode_t get_mode(const headers_t& meta, const std::string& strpath, bool checkdir
     headers_t::const_iterator iter;
 
     if(meta.cend() != (iter = meta.find("x-amz-meta-mode"))){
-        mode = get_mode((*iter).second.c_str());
+        if (stat_version == 1) {
+            mode = get_mode((*iter).second.c_str(), 10);
+        } else {
+            mode = get_mode((*iter).second.c_str(), 8);
+        }
     }else if(meta.cend() != (iter = meta.find("x-amz-meta-permissions"))){ // for s3sync
         mode = get_mode((*iter).second.c_str());
         isS3sync = true;

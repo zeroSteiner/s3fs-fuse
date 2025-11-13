@@ -42,6 +42,7 @@ off_t get_size(const char *s);
 off_t get_size(const headers_t& meta);
 mode_t get_mode(const char *s, int base = 0);
 mode_t get_mode(const headers_t& meta, const std::string& strpath, bool checkdir = false, bool forcedir = false);
+std::string mode_to_str(mode_t mode);
 bool is_reg_fmt(const headers_t& meta);
 bool is_symlink_fmt(const headers_t& meta);
 bool is_dir_fmt(const headers_t& meta);
