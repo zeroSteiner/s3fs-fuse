@@ -144,7 +144,7 @@ static struct timespec get_time_v1(const headers_t& meta, const char *header)
 
 struct timespec get_mtime(const headers_t& meta, bool overcheck)
 {
-    struct timespec mtime = get_time(meta, "x-amz-meta-mtime");
+    struct timespec mtime = get_time(meta, mtime_header_name.c_str());
     if(0 <= mtime.tv_sec && UTIME_OMIT != mtime.tv_nsec){
         return mtime;
     }
@@ -162,14 +162,7 @@ struct timespec get_mtime(const headers_t& meta, bool overcheck)
 
 struct timespec get_ctime(const headers_t& meta, bool overcheck)
 {
-    struct timespec ctime;
-    if (stat_version == 1) {
-        ctime = get_time_v1(meta, "x-amz-meta-ctime");
-    } else if (stat_version == 2) {
-        ctime = get_time(meta, "x-amz-meta-btime");
-    } else {
-        return OMIT_TIMESPEC;
-    }
+    struct timespec ctime = get_time(meta, ctime_header_name.c_str());
 
     if(0 <= ctime.tv_sec && UTIME_OMIT != ctime.tv_nsec){
         return ctime;
@@ -183,7 +176,7 @@ struct timespec get_ctime(const headers_t& meta, bool overcheck)
 
 struct timespec get_atime(const headers_t& meta, bool overcheck)
 {
-    struct timespec atime = get_time(meta, "x-amz-meta-atime");
+    struct timespec atime = get_time(meta, atime_header_name.c_str());
     if(0 <= atime.tv_sec && UTIME_OMIT != atime.tv_nsec){
         return atime;
     }
@@ -222,6 +215,43 @@ std::string mode_to_str(mode_t mode)
         // Version 2: octal format
         char buf[32];
         snprintf(buf, sizeof(buf), "%o", mode);
+        return std::string(buf);
+    }
+}
+
+std::string timespec_to_str(const struct timespec& ts)
+{
+    if(stat_version == 1){
+        // Version 1: "seconds.nanoseconds" format
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%ld.%09ld", ts.tv_sec, ts.tv_nsec);
+        return std::string(buf);
+    }else{
+        // Version 2: ISO 8601 format with local timezone
+        struct tm tm_time;
+        if(!localtime_r(&ts.tv_sec, &tm_time)){
+            return "";
+        }
+
+        // Calculate timezone offset from UTC
+        long tz_offset_sec = tm_time.tm_gmtoff;
+        int tz_hours = labs(tz_offset_sec) / 3600;
+        int tz_mins = (labs(tz_offset_sec) % 3600) / 60;
+        char tz_sign = (tz_offset_sec >= 0) ? '+' : '-';
+
+        // Format: "YYYY-MM-DDTHH:MM:SS.nnnnnnnnn+HH:MM"
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%09ld%c%02d:%02d",
+                 tm_time.tm_year + 1900,
+                 tm_time.tm_mon + 1,
+                 tm_time.tm_mday,
+                 tm_time.tm_hour,
+                 tm_time.tm_min,
+                 tm_time.tm_sec,
+                 ts.tv_nsec,
+                 tz_sign,
+                 tz_hours,
+                 tz_mins);
         return std::string(buf);
     }
 }
@@ -496,9 +526,9 @@ bool is_need_check_obj_detail(const headers_t& meta)
     }
     // if the object has x-amz-meta information, checking is no more.
     if(meta.cend() != meta.find("x-amz-meta-mode")  ||
-       meta.cend() != meta.find("x-amz-meta-mtime") ||
-       meta.cend() != meta.find("x-amz-meta-ctime") ||
-       meta.cend() != meta.find("x-amz-meta-atime") ||
+       meta.cend() != meta.find(mtime_header_name) ||
+       meta.cend() != meta.find(ctime_header_name) ||
+       meta.cend() != meta.find(atime_header_name) ||
        meta.cend() != meta.find("x-amz-meta-uid")   ||
        meta.cend() != meta.find("x-amz-meta-gid")   ||
        meta.cend() != meta.find("x-amz-meta-owner") ||
@@ -582,6 +612,33 @@ bool convert_header_to_stat(const std::string& strpath, const headers_t& meta, s
     stbuf.st_gid = get_gid(meta);
 
     return true;
+}
+
+void set_ts_headers(headers_t& headers, const struct timespec* ts_atime, const struct timespec* ts_ctime, const struct timespec* ts_mtime) {
+    if(ts_atime){
+        headers[atime_header_name] = timespec_to_str(*ts_atime);
+    }
+    if(ts_mtime){
+        headers[mtime_header_name] = timespec_to_str(*ts_mtime);
+    }
+    if(ts_ctime){
+        headers[ctime_header_name] = timespec_to_str(*ts_ctime);
+    }
+}
+
+void set_stat_headers(headers_t& headers, mode_t mode, uid_t uid, gid_t gid)
+{
+    struct timespec ts_now;
+    s3fs_realtime(ts_now);
+    set_stat_headers(headers, mode, uid, gid, ts_now, ts_now, ts_now);
+}
+
+void set_stat_headers(headers_t& headers, mode_t mode, uid_t uid, gid_t gid, const struct timespec& ts_atime, const struct timespec& ts_ctime, const struct timespec& ts_mtime)
+{
+    headers["x-amz-meta-uid"] = std::to_string(uid);
+    headers["x-amz-meta-gid"] = std::to_string(gid);
+    headers["x-amz-meta-mode"] = mode_to_str(mode);
+    set_ts_headers(headers, &ts_atime, &ts_ctime, &ts_mtime);
 }
 
 /*

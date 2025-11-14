@@ -50,6 +50,10 @@ std::atomic<long long unsigned> num_requests_mpu_upload_part;
 std::atomic<long long unsigned> num_requests_mpu_copy_part;
 std::atomic<int unsigned> stat_version{1};
 
+std::string atime_header_name     = "x-amz-meta-atime";
+std::string ctime_header_name     = "x-amz-meta-ctime";
+std::string mtime_header_name     = "x-amz-meta-mtime";
+
 /*
 * Local variables:
 * tab-width: 4

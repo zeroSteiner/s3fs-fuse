@@ -767,7 +767,7 @@ int FdEntity::SetCtimeHasLock(struct timespec time)
         return 0;
     }
     timestamps.SetCTime(time);
-    orgmeta["x-amz-meta-ctime"] = str(time);
+    orgmeta[ctime_header_name] = timespec_to_str(time);
     return 0;
 }
 
@@ -779,7 +779,7 @@ int FdEntity::SetAtimeHasLock(struct timespec time)
         return 0;
     }
     timestamps.SetATime(time);
-    orgmeta["x-amz-meta-atime"] = str(time);
+    orgmeta[atime_header_name] = timespec_to_str(time);
     return 0;
 }
 
@@ -791,7 +791,7 @@ int FdEntity::SetMtimeHasLock(struct timespec time)
         return 0;
     }
     timestamps.SetMTime(time);
-    orgmeta["x-amz-meta-mtime"] = str(time);
+    orgmeta[mtime_header_name] = timespec_to_str(time);
     return 0;
 }
 
@@ -826,7 +826,7 @@ int FdEntity::SetFileTimesHasLock(const FileTimes& ts_times)
 
     // Set original meta headers / Set time to stat from original meta
     if(!timestamps.IsOmitATime()){
-        orgmeta["x-amz-meta-atime"] = str(timestamps.atime());
+        orgmeta[atime_header_name] = timespec_to_str(timestamps.atime());
     }else{
         struct timespec meta_atime = get_atime(orgmeta, false);
         if(0 != meta_atime.tv_sec && UTIME_OMIT != meta_atime.tv_nsec){
@@ -834,7 +834,7 @@ int FdEntity::SetFileTimesHasLock(const FileTimes& ts_times)
         }
     }
     if(!timestamps.IsOmitMTime()){
-        orgmeta["x-amz-meta-mtime"] = str(timestamps.mtime());
+        orgmeta[mtime_header_name] = timespec_to_str(timestamps.mtime());
     }else{
         struct timespec meta_mtime = get_mtime(orgmeta, false);
         if(0 != meta_mtime.tv_sec && UTIME_OMIT != meta_mtime.tv_nsec){
@@ -842,7 +842,7 @@ int FdEntity::SetFileTimesHasLock(const FileTimes& ts_times)
         }
     }
     if(!timestamps.IsOmitCTime()){
-        orgmeta["x-amz-meta-ctime"] = str(timestamps.ctime());
+        orgmeta[ctime_header_name] = timespec_to_str(timestamps.ctime());
     }else{
         struct timespec meta_ctime = get_ctime(orgmeta, false);
         if(0 != meta_ctime.tv_sec && UTIME_OMIT != meta_ctime.tv_nsec){

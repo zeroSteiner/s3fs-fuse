@@ -60,6 +60,10 @@ extern std::atomic<long long unsigned> num_requests_mpu_upload_part;
 extern std::atomic<long long unsigned> num_requests_mpu_copy_part;
 extern std::atomic<int unsigned> stat_version;
 
+extern std::string    atime_header_name;
+extern std::string    ctime_header_name;
+extern std::string    mtime_header_name;
+
 //-------------------------------------------------------------------
 // For weak attribute
 //-------------------------------------------------------------------

@@ -527,9 +527,9 @@ static int get_object_attribute(const char* path, struct stat* pstbuf, headers_t
            pmeta->cend() == pmeta->find("x-amz-meta-uid")   ||
            pmeta->cend() == pmeta->find("x-amz-meta-gid")   ||
            pmeta->cend() == pmeta->find("x-amz-meta-mode")  ||
-           pmeta->cend() == pmeta->find("x-amz-meta-atime") ||
-           pmeta->cend() == pmeta->find("x-amz-meta-ctime") ||
-           pmeta->cend() == pmeta->find("x-amz-meta-mtime") )
+           pmeta->cend() == pmeta->find(atime_header_name) ||
+           pmeta->cend() == pmeta->find(ctime_header_name) ||
+           pmeta->cend() == pmeta->find(mtime_header_name) )
         {
             has_mp_stat = false;
             *pObjType   = objtype_t::DIR_NOT_EXIST_OBJECT;
@@ -541,12 +541,12 @@ static int get_object_attribute(const char* path, struct stat* pstbuf, headers_t
             //
             pmeta->clear();
             (*pmeta)["Content-Type"]     = S3fsCurl::LookupMimeType(strpath);
-            (*pmeta)["x-amz-meta-uid"]   = std::to_string(pstbuf->st_uid);
-            (*pmeta)["x-amz-meta-gid"]   = std::to_string(pstbuf->st_gid);
-            (*pmeta)["x-amz-meta-mode"]  = mode_to_str(pstbuf->st_mode);
-            (*pmeta)["x-amz-meta-atime"] = std::to_string(pstbuf->st_atime);
-            (*pmeta)["x-amz-meta-ctime"] = std::to_string(pstbuf->st_ctime);
-            (*pmeta)["x-amz-meta-mtime"] = std::to_string(pstbuf->st_mtime);
+
+            struct timespec atime, ctime, mtime;
+            set_stat_to_timespec(*pstbuf, stat_time_type::ATIME, atime);
+            set_stat_to_timespec(*pstbuf, stat_time_type::CTIME, ctime);
+            set_stat_to_timespec(*pstbuf, stat_time_type::MTIME, mtime);
+            set_stat_headers(*pmeta, pstbuf->st_mode, pstbuf->st_uid, pstbuf->st_gid, atime, ctime, mtime);
         }else{
             has_mp_stat = true;
             *pObjType   = objtype_t::DIR_NORMAL;
@@ -1004,15 +1004,10 @@ static int s3fs_readlink(const char* _path, char* buf, size_t size)
         bool      add_cache = true;
         if(!found_cache){
             // make headers for symlink
-            std::string strnow       = s3fs_str_realtime();
+            mode_t mode = (S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO);
             meta["Content-Type"]     = "application/octet-stream";  // Static
             meta["Content-Length"]   = std::to_string(ressize);     // length
-            meta["x-amz-meta-mode"]  = mode_to_str(S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO);
-            meta["x-amz-meta-atime"] = strnow;
-            meta["x-amz-meta-ctime"] = strnow;
-            meta["x-amz-meta-mtime"] = strnow;
-            meta["x-amz-meta-uid"]   = std::to_string(pcxt->uid);
-            meta["x-amz-meta-gid"]   = std::to_string(pcxt->gid);
+            set_stat_headers(meta, mode, pcxt->uid, pcxt->gid);
 
             if(!convert_header_to_stat(strPath, meta, stbuf, false)){
                 S3FS_PRN_ERR("failed convert headers to stat[path=%s], but continue...", strPath.c_str());
@@ -1044,15 +1039,9 @@ static int create_file_object(const char* path, mode_t mode, uid_t uid, gid_t gi
 {
     S3FS_PRN_INFO2("[path=%s][mode=%04o]", path, mode);
 
-    std::string strnow = s3fs_str_realtime();
     headers_t   meta;
     meta["Content-Type"]     = S3fsCurl::LookupMimeType(path);
-    meta["x-amz-meta-uid"]   = std::to_string(uid);
-    meta["x-amz-meta-gid"]   = std::to_string(gid);
-    meta["x-amz-meta-mode"]  = mode_to_str(mode);
-    meta["x-amz-meta-atime"] = strnow;
-    meta["x-amz-meta-ctime"] = strnow;
-    meta["x-amz-meta-mtime"] = strnow;
+    set_stat_headers(meta, mode, uid, gid);
 
     int result;
     if(0 != (result = put_request(SAFESTRPTR(path), meta, -1, true/* ahbe */))){
@@ -1127,15 +1116,9 @@ static int s3fs_create(const char* _path, mode_t mode, struct fuse_file_info* fi
     }
 
     // Set meta headers
-    std::string strnow = s3fs_str_realtime();
     headers_t   meta;
     meta["Content-Length"] = "0";
-    meta["x-amz-meta-uid"]   = std::to_string(pcxt->uid);
-    meta["x-amz-meta-gid"]   = std::to_string(pcxt->gid);
-    meta["x-amz-meta-mode"]  = mode_to_str(mode);
-    meta["x-amz-meta-atime"] = strnow;
-    meta["x-amz-meta-mtime"] = strnow;
-    meta["x-amz-meta-ctime"] = strnow;
+    set_stat_headers(meta, mode, pcxt->uid, pcxt->gid);
 
     std::string xattrvalue;
     if(build_inherited_xattr_value(strpath.c_str(), xattrvalue)){
@@ -1192,12 +1175,7 @@ static int create_directory_object(const char* path, mode_t mode, const struct t
     }
 
     headers_t meta;
-    meta["x-amz-meta-uid"]   = std::to_string(uid);
-    meta["x-amz-meta-gid"]   = std::to_string(gid);
-    meta["x-amz-meta-mode"]  = mode_to_str(mode);
-    meta["x-amz-meta-atime"] = str(ts_atime);
-    meta["x-amz-meta-mtime"] = str(ts_mtime);
-    meta["x-amz-meta-ctime"] = str(ts_ctime);
+    set_stat_headers(meta, mode, uid, gid, ts_atime, ts_ctime, ts_mtime);
 
     if(pxattrvalue){
         S3FS_PRN_DBG("Set xattrs = %s", urlDecode(pxattrvalue).c_str());
@@ -1438,15 +1416,10 @@ static int s3fs_symlink(const char* _from, const char* _to)
         return result;
     }
 
-    std::string strnow = s3fs_str_realtime();
     headers_t   headers;
     headers["Content-Type"]     = "application/octet-stream"; // Static
-    headers["x-amz-meta-mode"]  = mode_to_str(S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO);
-    headers["x-amz-meta-atime"] = strnow;
-    headers["x-amz-meta-ctime"] = strnow;
-    headers["x-amz-meta-mtime"] = strnow;
-    headers["x-amz-meta-uid"]   = std::to_string(pcxt->uid);
-    headers["x-amz-meta-gid"]   = std::to_string(pcxt->gid);
+    mode_t mode = (S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO);
+    set_stat_headers(headers, mode, pcxt->uid, pcxt->gid);
 
     // [NOTE]
     // Symbolic links do not set xattrs.
@@ -1526,7 +1499,7 @@ static int rename_object(const char* from, const char* to, bool update_ctime)
     std::string strSourcePath        = (mount_prefix.empty() && 0 == strcmp("/", from)) ? "//" : from;
 
     if(update_ctime){
-        meta["x-amz-meta-ctime"]     = s3fs_str_realtime();
+        meta[ctime_header_name]      = s3fs_str_realtime();
     }
     meta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
     meta["Content-Type"]             = S3fsCurl::LookupMimeType(to);
@@ -2047,7 +2020,7 @@ static int s3fs_chmod(const char* _path, mode_t mode)
         // normal object or directory object of newer version
         std::string strSourcePath              = (mount_prefix.empty() && "/" == curpath) ? "//" : curpath;
         headers_t   updatemeta;
-        updatemeta["x-amz-meta-ctime"]         = s3fs_str_realtime();
+        updatemeta[ctime_header_name]             = s3fs_str_realtime();
         updatemeta["x-amz-meta-mode"]          = mode_to_str(mode);
         updatemeta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
         updatemeta["x-amz-metadata-directive"] = "REPLACE";
@@ -2298,7 +2271,7 @@ static int s3fs_chown(const char* _path, uid_t uid, gid_t gid)
     }else{
         std::string strSourcePath              = (mount_prefix.empty() && "/" == curpath) ? "//" : curpath;
         headers_t   updatemeta;
-        updatemeta["x-amz-meta-ctime"]         = s3fs_str_realtime();
+        updatemeta[ctime_header_name]             = s3fs_str_realtime();
         updatemeta["x-amz-meta-uid"]           = std::to_string(uid);
         updatemeta["x-amz-meta-gid"]           = std::to_string(gid);
         updatemeta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
@@ -2578,9 +2551,7 @@ static int update_mctime_parent_directory(const char* _path)
     }else{
         std::string strSourcePath              = (mount_prefix.empty() && "/" == curpath) ? "//" : curpath;
         headers_t   updatemeta;
-        updatemeta["x-amz-meta-mtime"]         = str(mctime);
-        updatemeta["x-amz-meta-ctime"]         = str(mctime);
-        updatemeta["x-amz-meta-atime"]         = str(atime);
+        set_ts_headers(updatemeta, &atime, &mctime, &mctime);
         updatemeta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
         updatemeta["x-amz-metadata-directive"] = "REPLACE";
 
@@ -2684,9 +2655,7 @@ static int s3fs_utimens(const char* _path, const struct timespec ts[2])
     }else{
         std::string strSourcePath              = (mount_prefix.empty() && "/" == curpath) ? "//" : curpath;
         headers_t   updatemeta;
-        updatemeta["x-amz-meta-mtime"]         = str(mtime);
-        updatemeta["x-amz-meta-ctime"]         = str(ctime);
-        updatemeta["x-amz-meta-atime"]         = str(atime);
+        set_ts_headers(updatemeta, &atime, &ctime, &mtime);
         updatemeta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
         updatemeta["x-amz-metadata-directive"] = "REPLACE";
 
@@ -2948,11 +2917,11 @@ static int s3fs_truncate(const char* _path, off_t size)
             return -EIO;
         }
 
-        std::string strnow       = s3fs_str_realtime();
-        meta["Content-Type"]     = "application/octet-stream"; // Static
+        struct timespec ts_now;
+        s3fs_realtime(ts_now);
+        set_ts_headers(meta, nullptr, &ts_now, &ts_now);
+        meta["Content-Type"]     = "application/octet-stream"; // Static]
         meta["x-amz-meta-mode"]  = mode_to_str(S_IFLNK | S_IRWXU | S_IRWXG | S_IRWXO);
-        meta["x-amz-meta-ctime"] = strnow;
-        meta["x-amz-meta-mtime"] = strnow;
         meta["x-amz-meta-uid"]   = std::to_string(pcxt->uid);
         meta["x-amz-meta-gid"]   = std::to_string(pcxt->gid);
 
@@ -3466,12 +3435,9 @@ static int readdir_multi_head(const std::string& strpath, const S3ObjList& head,
 
         headers_t   dummy_header;
         dummy_header["Content-Type"]     = "application/x-directory";          // directory
-        dummy_header["x-amz-meta-uid"]   = std::to_string(is_s3fs_uid ? s3fs_uid : geteuid());
-        dummy_header["x-amz-meta-gid"]   = std::to_string(is_s3fs_gid ? s3fs_gid : getegid());
-        dummy_header["x-amz-meta-mode"]  = mode_to_str(S_IFDIR | (~dirmask & (S_IRWXU | S_IRWXG | S_IRWXO)));
-        dummy_header["x-amz-meta-atime"] = "0";
-        dummy_header["x-amz-meta-ctime"] = "0";
-        dummy_header["x-amz-meta-mtime"] = "0";
+        mode_t mode = (S_IFDIR | (~dirmask & (S_IRWXU | S_IRWXG | S_IRWXO)));
+        struct timespec zero = {0, 0};
+        set_stat_headers(dummy_header, mode, (is_s3fs_uid ? s3fs_uid : geteuid()), (is_s3fs_gid ? s3fs_gid : getegid()), zero, zero, zero);
 
         for(auto reiter = notfound_list.cbegin(); reiter != notfound_list.cend(); ++reiter){
             int dir_result;
@@ -4026,7 +3992,9 @@ static int s3fs_setxattr(const char* _path, const char* name, const char* value,
     // set xattr all object
     std::string strSourcePath              = (mount_prefix.empty() && "/" == curpath) ? "//" : curpath;
     headers_t   updatemeta;
-    updatemeta["x-amz-meta-ctime"]         = s3fs_str_realtime();
+    struct timespec ts_now;
+    s3fs_realtime(ts_now);
+    updatemeta[ctime_header_name]             = timespec_to_str(ts_now);
     updatemeta["x-amz-copy-source"]        = urlEncodePath(service_path + S3fsCred::GetBucket() + get_realpath(strSourcePath.c_str()));
     updatemeta["x-amz-metadata-directive"] = "REPLACE";
 
@@ -4471,6 +4439,17 @@ static void s3fs_exit_fuseloop(int exit_status)
 static void* s3fs_init(struct fuse_conn_info* conn)
 {
     S3FS_PRN_INIT_INFO("init v%s%s with %s, credential-library(%s)", VERSION, COMMIT_HASH_VAL, s3fs_crypt_lib_name(), ps3fscred->GetCredFuncVersion(false));
+
+    // Initialize header names based on stat_version
+    if (stat_version == 1) {
+        atime_header_name = "x-amz-meta-atime";
+        ctime_header_name = "x-amz-meta-ctime";
+        mtime_header_name = "x-amz-meta-mtime";
+    } else {
+        atime_header_name = "x-amz-meta-atime";
+        ctime_header_name = "x-amz-meta-btime";
+        mtime_header_name = "x-amz-meta-mtime";
+    }
 
     // cache(remove cache dirs at first)
     if(is_remove_cache && (!CacheFileStat::DeleteCacheFileStatDirectory() || !FdManager::DeleteCacheDirectory())){
