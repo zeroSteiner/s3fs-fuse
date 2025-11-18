@@ -463,6 +463,11 @@ The file path parameter can be omitted. If omitted, the result will be output to
 \fB\-o\fR update_parent_dir_stat (default is disable)
 The parent directory's mtime and ctime are updated when a file or directory is created or deleted (when the parent directory's inode is updated).
 By default, parent directory statistics are not updated.
+.TP
+\fB\-o\fR stat_version (default is 1)
+Controls how the file stat information is used in the S3 Headers.
+ 1: The original s3fs-fuse stat format (decimal mode, Unix timestamps).
+ 2: rclone compatible stat format (octal mode, ISO 8601 timestamps).
 .SS "utility mode options"
 .TP
 \fB\-u\fR or \fB\-\-incomplete\-mpu\-list\fR
